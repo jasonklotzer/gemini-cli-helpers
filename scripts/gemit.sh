@@ -6,8 +6,6 @@
 # variable is used, or if a command in a pipeline fails.
 set -euo pipefail
 
-# TODO: #2 Create animated spinner while waiting for Gemini CLI to respond.
-
 # Function to show a spinner while a command is running
 show_spinner() {
     local -r frames='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
@@ -29,8 +27,6 @@ cleanup() {
     printf "\r"
 }
 trap cleanup EXIT
-
-# TODO: #1 Create help flag that explains how to use this script.
 
 # Check for help flag
 if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
