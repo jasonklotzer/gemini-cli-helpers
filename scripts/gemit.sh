@@ -12,11 +12,10 @@ set -euo pipefail
 show_spinner() {
     local -r frames='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
     local -r delay=0.1
-    local -r message="$1"
     local i=0
     tput civis # Hide cursor
     while :; do
-        printf "\r%s %s" "${frames:i++%${#frames}:1}" "$message"
+        printf "\r%s" "${frames:i++%${#frames}:1}"
         sleep "$delay"
     done
 }
@@ -57,12 +56,12 @@ then
 fi
 
 # Call the Gemini CLI with the staged diff and request a brief commit message.
-show_spinner "Generating commit message..." &
+show_spinner &
 SPINNER_PID=$!
-COMMIT_MESSAGE=$(git diff --staged | gemini -m gemini-2.5-flash-lite -p "Based on the following git diff, provide a single explanatory commit message, no larger than 100 characters. As long as the total commit message is within the 100 character limit, other lines can be used to describe important changes. If there were any github issues referenced in TODO comments removed as a part of this commit, close them through the commit message (e.g. fixes #1). Just return the message itself, with no extra text or explanations." 2>/dev/null)
+COMMIT_MESSAGE=$(git diff --staged | gemini -m gemini-2.5-flash-lite -p "Generate a concise, one-line GitHub commit message based on the following git diff. The message should be no more than 72 characters. If the diff shows the removal of a comment like '# TODO: #123 ...', the commit message should end with '(fixes #123)'. Only include the issue number if the TODO comment is being removed. You do not have to modify any files. Return only the commit message itself, without any extra text or explanations." 2>/dev/null)
 kill "$SPINNER_PID" &>/dev/null
 tput cnorm # Restore cursor
-printf "\r%s\n" "✔ Commit message generated."
+printf "\r%s\n"
 
 # Check if a message was successfully generated
 if [[ -z "${COMMIT_MESSAGE}" ]]; then
