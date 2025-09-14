@@ -69,19 +69,25 @@ while [[ "$#" -gt 0 ]]; do
   esac
 done
 
-ACTION_SUMMARY="Generating commit message"
+ACTION_SUMMARY=""
+OPERATIONS=()
+
 if [ "$STAGE_ALL" = true ]; then
-  ACTION_SUMMARY="Staging all files. $ACTION_SUMMARY"
+  OPERATIONS+=("stage")
   git add -A
 fi
 
-if [ "$SUBMODULE_COMMIT" = true ]; then
-  ACTION_SUMMARY="$ACTION_SUMMARY and committing submodule."
-fi
+OPERATIONS+=("commit")
 
 if [ "$RUN_RELEASE" = true ]; then
-    ACTION_SUMMARY="$ACTION_SUMMARY and running release."
+  OPERATIONS+=("release")
 fi
+
+if [ "$SUBMODULE_COMMIT" = true ]; then
+  OPERATIONS+=("submodule")
+fi
+
+ACTION_SUMMARY=$(IFS=" > "; echo "${OPERATIONS[*]}")
 
 
 # Check if there are any staged changes to commit.
