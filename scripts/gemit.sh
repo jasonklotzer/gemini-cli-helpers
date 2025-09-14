@@ -32,11 +32,12 @@ trap cleanup EXIT
 # Check for command line arguments
 SUBMODULE_COMMIT=false
 STAGE_ALL=false
+RUN_RELEASE=false
 
 while [[ "$#" -gt 0 ]]; do
   case $1 in
     -h|--help)
-      echo "Usage: $(basename "$0") [-a|--all] [-s|--submodule]"
+      echo "Usage: $(basename "$0") [-a|--all] [-s|--submodule] [-r|--release]"
       echo ""
       echo "This script automates the process of generating a commit message using the Gemini CLI and then committing the changes."
       echo ""
@@ -44,6 +45,7 @@ while [[ "$#" -gt 0 ]]; do
       echo "  -h, --help         Show this help message and exit."
       echo "  -a, --all          Stage all tracked files before committing."
       echo "  -s, --submodule    If in a submodule, commit the submodule changes in the parent repository."
+      echo "  -r, --release      Run 'npm run release' after committing."
       echo ""
       echo "Before running, ensure that you have staged the changes you want to commit, or use the -a/--all flag."
       exit 0
@@ -54,6 +56,10 @@ while [[ "$#" -gt 0 ]]; do
     ;;
     -s|--submodule)
       SUBMODULE_COMMIT=true
+      shift
+    ;;
+    -r|--release)
+      RUN_RELEASE=true
       shift
     ;;
     *)
@@ -71,6 +77,10 @@ fi
 
 if [ "$SUBMODULE_COMMIT" = true ]; then
   ACTION_SUMMARY="$ACTION_SUMMARY and committing submodule."
+fi
+
+if [ "$RUN_RELEASE" = true ]; then
+    ACTION_SUMMARY="$ACTION_SUMMARY and running release."
 fi
 
 
@@ -104,6 +114,10 @@ fi
 
 # Perform the commit with the generated message.
 git commit -m "${COMMIT_MESSAGE}"
+
+if [ "$RUN_RELEASE" = true ]; then
+    npm run release
+fi
 
 if [ "$SUBMODULE_COMMIT" = true ]; then
   # Check if this is a submodule

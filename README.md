@@ -56,6 +56,7 @@ The script will use the staged diff to generate a concise commit message and the
 | `-h`, `--help`     | Show the help message and exit.                                                  |
 | `-a`, `--all`      | Stage all tracked files before committing.                                       |
 | `-s`, `--submodule`| If in a submodule, commit the submodule changes in the parent repository as well. |
+| `-r`, `--release`  | Run 'npm run release' after committing.                                          |
 
 **Examples:**
 
@@ -73,4 +74,9 @@ The script will use the staged diff to generate a concise commit message and the
 -   Stage all files and commit submodule changes in the parent repository:
     ```bash
     gemit -a -s
+    ```
+
+-   Stage all files, generate a commit message, and run the release script:
+    ```bash
+    gemit -a -r
     ```
