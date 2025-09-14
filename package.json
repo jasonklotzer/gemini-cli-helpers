@@ -1,0 +1,19 @@
+{
+  "name": "gemini-cli-helpers",
+  "version": "1.0.0",
+  "description": "A collection of helper scripts for the Gemini CLI.",
+  "bin": {
+    "gemit": "scripts/gemit.sh"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "gemini",
+    "cli",
+    "git",
+    "commit"
+  ],
+  "author": "Jason Klotzer",
+  "license": "Apache-2.0"
+}

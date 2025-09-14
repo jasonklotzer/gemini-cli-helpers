@@ -1,6 +1,19 @@
 #!/bin/bash
 
-# This script installs all executable scripts in this directory by creating aliases for them.
+# This script installs or uninstalls aliases for the gemini-cli-helpers scripts.
+
+# Help message
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
+    echo "Usage: $(basename "$0") [option]"
+    echo ""
+    echo "Installs or uninstalls aliases for the gemini-cli-helpers scripts."
+    echo ""
+    echo "Options:"
+    echo "  (no option)      Install the script aliases."
+    echo "  -u, --uninstall  Remove the script aliases."
+    echo "  -h, --help       Show this help message and exit."
+    exit 0
+fi
 
 # The directory where this script is located
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -11,6 +24,19 @@ BASHRC_FILE="$HOME/.bashrc"
 
 # A marker to identify aliases managed by this script
 MARKER="# Added by gemini-cli-helpers installer"
+
+# Uninstall logic
+if [[ "${1:-}" == "--uninstall" || "${1:-}" == "-u" ]]; then
+    if [[ -f "$ALIAS_FILE" ]] && grep -q "$MARKER" "$ALIAS_FILE"; then
+        echo "Uninstalling gemini-cli-helpers aliases..."
+        sed -i "/$MARKER/d" "$ALIAS_FILE"
+        echo "Aliases removed from $ALIAS_FILE."
+        echo "Please run 'source $BASHRC_FILE' or restart your shell to apply the changes."
+    else
+        echo "No gemini-cli-helpers aliases found to uninstall."
+    fi
+    exit 0
+fi
 
 echo "Installing scripts from $SCRIPT_DIR..."
 
