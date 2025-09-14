@@ -28,14 +28,43 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# Check for help flag
-if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
-  echo "Usage: $(basename "$0")"
-  echo ""
-  echo "This script automates the process of generating a commit message using the Gemini CLI and then committing the changes."
-  echo ""
-  echo "Before running, ensure that you have staged the changes you want to commit."
-  exit 0
+# Check for command line arguments
+SUBMODULE_COMMIT=false
+STAGE_ALL=false
+
+while [[ "$#" -gt 0 ]]; do
+    case $1 in
+        -h|--help)
+            echo "Usage: $(basename "$0") [-a|--all] [-s|--submodule]"
+            echo ""
+            echo "This script automates the process of generating a commit message using the Gemini CLI and then committing the changes."
+            echo ""
+            echo "Options:"
+            echo "  -h, --help         Show this help message and exit."
+            echo "  -a, --all          Stage all tracked files before committing."
+            echo "  -s, --submodule    If in a submodule, commit the submodule changes in the parent repository."
+            echo ""
+            echo "Before running, ensure that you have staged the changes you want to commit, or use the -a/--all flag."
+            exit 0
+            ;;
+        -a|--all)
+            STAGE_ALL=true
+            shift
+            ;;
+        -s|--submodule)
+            SUBMODULE_COMMIT=true
+            shift
+            ;;
+        *)
+            echo "Unknown parameter passed: $1"
+            exit 1
+            ;;
+    esac
+done
+
+if [ "$STAGE_ALL" = true ]; then
+    echo "Staging all changes..."
+    git add -A
 fi
 
 # Check if there are any staged changes to commit.
@@ -68,3 +97,17 @@ fi
 
 # Perform the commit with the generated message.
 git commit -m "${COMMIT_MESSAGE}"
+
+if [ "$SUBMODULE_COMMIT" = true ]; then
+    # Check if this is a submodule
+    SUPERPROJECT_WORK_TREE=$(git rev-parse --show-superproject-working-tree)
+    if [ -n "$SUPERPROJECT_WORK_TREE" ]; then
+        echo "Submodule detected. Committing update in parent repository..."
+        SUBMODULE_PATH=$(git rev-parse --show-toplevel)
+        SUBMODULE_NAME=$(basename "$SUBMODULE_PATH")
+        (cd "$SUPERPROJECT_WORK_TREE" && git add "$SUBMODULE_PATH" && git commit -m "Update submodule ${SUBMODULE_NAME}")
+        echo "Parent repository updated."
+    else
+        echo "Not a submodule. Skipping parent commit."
+    fi
+fi
