@@ -87,7 +87,8 @@ if [ "$SUBMODULE_COMMIT" = true ]; then
   OPERATIONS+=("submodule")
 fi
 
-ACTION_SUMMARY=$(IFS=" > "; echo "${OPERATIONS[*]}")
+ACTION_SUMMARY=$(printf " » %s" "${OPERATIONS[@]}")
+ACTION_SUMMARY=${ACTION_SUMMARY:4}
 
 
 # Check if there are any staged changes to commit.
@@ -104,7 +105,7 @@ then
 fi
 
 # Call the Gemini CLI with the staged diff and request a brief commit message.
-show_spinner "$ACTION_SUMMARY" &
+show_spinner "exec: $ACTION_SUMMARY" &
 SPINNER_PID=$!
 COMMIT_MESSAGE=$(git diff --staged | gemini -m gemini-2.5-flash-lite -p "Generate a concise, one-line GitHub commit message based on the following git diff. The message should be no more than 72 characters. If the diff shows the removal of a comment like '# TODO: #123 ...', the commit message should end with '(fixes #123)'. Only include the issue number if the TODO comment is being removed. You do not have to modify any files. Return only the commit message itself, without any extra text or explanations." 2>/dev/null)
 kill "$SPINNER_PID" &>/dev/null
