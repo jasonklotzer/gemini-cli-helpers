@@ -88,7 +88,7 @@ if [ "$SUBMODULE_COMMIT" = true ]; then
 fi
 
 ACTION_SUMMARY=$(printf " » %s" "${OPERATIONS[@]}")
-ACTION_SUMMARY="exec ${ACTION_SUMMARY}"
+ACTION_SUMMARY="exec${ACTION_SUMMARY}"
 
 
 # Check if there are any staged changes to commit.
