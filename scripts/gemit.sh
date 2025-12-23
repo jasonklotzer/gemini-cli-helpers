@@ -33,11 +33,12 @@ trap cleanup EXIT
 SUBMODULE_COMMIT=false
 STAGE_ALL=false
 RUN_RELEASE=false
+VERBOSE=false
 
 while [[ "$#" -gt 0 ]]; do
   case $1 in
     -h|--help)
-      echo "Usage: $(basename "$0") [-a|--all] [-s|--submodule] [-r|--release]"
+      echo "Usage: $(basename "$0") [-a|--all] [-s|--submodule] [-r|--release] [-v|--verbose]"
       echo ""
       echo "This script automates the process of generating a commit message using the Gemini CLI and then committing the changes."
       echo ""
@@ -46,6 +47,7 @@ while [[ "$#" -gt 0 ]]; do
       echo "  -a, --all          Stage all tracked files before committing."
       echo "  -s, --submodule    If in a submodule, commit the submodule changes in the parent repository."
       echo "  -r, --release      Run 'npm run release' after committing."
+      echo "  -v, --verbose      Enable verbose mode to show all messages for debugging."
       echo ""
       echo "Before running, ensure that you have staged the changes you want to commit, or use the -a/--all flag."
       exit 0
@@ -62,6 +64,10 @@ while [[ "$#" -gt 0 ]]; do
       RUN_RELEASE=true
       shift
     ;;
+    -v|--verbose)
+      VERBOSE=true
+      shift
+    ;;
     *)
       echo "Unknown parameter passed: $1"
       exit 1
@@ -74,6 +80,9 @@ OPERATIONS=()
 
 if [ "$STAGE_ALL" = true ]; then
   OPERATIONS+=("stage")
+  if [ "$VERBOSE" = true ]; then
+    echo "Staging all tracked files..."
+  fi
   git add -A
 fi
 
@@ -97,6 +106,10 @@ if git diff --staged --quiet; then
   exit 0
 fi
 
+if [ "$VERBOSE" = true ]; then
+  echo "Staged changes detected."
+fi
+
 # Check if the Gemini CLI is available.
 if ! command -v gemini &> /dev/null
 then
@@ -105,13 +118,18 @@ then
 fi
 
 # Call the Gemini CLI with the staged diff and request a brief commit message.
-show_spinner "$ACTION_SUMMARY" &
-SPINNER_PID=$!
-COMMIT_MESSAGE=$(git diff --staged | gemini -m gemini-2.5-flash-lite -p "Generate a concise, one-line GitHub commit message based on the following git diff. The message should be no more than 72 characters. If the diff shows the removal of a comment like '# TODO: #123 ...', the commit message should end with '(fixes #123)'. Only include the issue number if the TODO comment is being removed. You do not have to modify any files. Return only the commit message itself, without any extra text or explanations." 2>/dev/null)
-kill "$SPINNER_PID" &>/dev/null
-unset SPINNER_PID
-tput cnorm # Restore cursor
-printf "\r%s\n"
+if [ "$VERBOSE" = true ]; then
+  echo "Generating commit message with Gemini CLI..."
+  COMMIT_MESSAGE=$(git diff --staged | gemini -m gemini-2.5-flash-lite -p "Generate a concise, one-line GitHub commit message based on the following git diff. The message should be no more than 72 characters. If the diff shows the removal of a comment like '# TODO: #123 ...', the commit message should end with '(fixes #123)'. Only include the issue number if the TODO comment is being removed. You do not have to modify any files. Return only the commit message itself, without any extra text or explanations.")
+else
+  show_spinner "$ACTION_SUMMARY" &
+  SPINNER_PID=$!
+  COMMIT_MESSAGE=$(git diff --staged | gemini -m gemini-2.5-flash-lite -p "Generate a concise, one-line GitHub commit message based on the following git diff. The message should be no more than 72 characters. If the diff shows the removal of a comment like '# TODO: #123 ...', the commit message should end with '(fixes #123)'. Only include the issue number if the TODO comment is being removed. You do not have to modify any files. Return only the commit message itself, without any extra text or explanations." 2>/dev/null)
+  kill "$SPINNER_PID" &>/dev/null
+  unset SPINNER_PID
+  tput cnorm # Restore cursor
+  printf "\r%s\n"
+fi
 
 # Check if a message was successfully generated
 if [[ -z "${COMMIT_MESSAGE}" ]]; then
@@ -119,10 +137,20 @@ if [[ -z "${COMMIT_MESSAGE}" ]]; then
   exit 1
 fi
 
+if [ "$VERBOSE" = true ]; then
+  echo "Generated commit message: ${COMMIT_MESSAGE}"
+fi
+
 # Perform the commit with the generated message.
+if [ "$VERBOSE" = true ]; then
+  echo "Committing changes..."
+fi
 git commit -m "${COMMIT_MESSAGE}"
 
 if [ "$RUN_RELEASE" = true ]; then
+    if [ "$VERBOSE" = true ]; then
+      echo "Running npm release..."
+    fi
     npm run release
 fi
 
@@ -132,6 +160,9 @@ if [ "$SUBMODULE_COMMIT" = true ]; then
   if [ -n "$SUPERPROJECT_WORK_TREE" ]; then
     SUBMODULE_PATH=$(git rev-parse --show-toplevel)
     SUBMODULE_NAME=$(basename "$SUBMODULE_PATH")
+    if [ "$VERBOSE" = true ]; then
+      echo "Committing submodule changes in parent repository..."
+    fi
     (cd "$SUPERPROJECT_WORK_TREE" && git add "$SUBMODULE_PATH" && git commit -m "Update submodule ${SUBMODULE_NAME}")
   fi
 fi
