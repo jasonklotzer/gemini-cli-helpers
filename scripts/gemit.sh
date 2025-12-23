@@ -130,7 +130,7 @@ then
 fi
 
 # Configuration for Gemini CLI
-GEMINI_MODEL="gemini-1.5-flash-8b"
+GEMINI_MODEL="gemini-2.5-flash-lite"
 COMMIT_PROMPT="Generate a concise git commit message (max 72 chars) for this diff. If a TODO comment with issue number is removed, end with '(fixes #123)'. Return only the commit message."
 
 # Call the Gemini CLI with the staged diff and request a brief commit message.
