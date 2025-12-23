@@ -37,6 +37,17 @@ VERBOSE=false
 
 while [[ "$#" -gt 0 ]]; do
   case $1 in
+    --version)
+      SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+      PACKAGE_JSON="$SCRIPT_DIR/../package.json"
+      if [ -f "$PACKAGE_JSON" ]; then
+        VERSION=$(grep -oP '(?<="version": ")[^"]*' "$PACKAGE_JSON")
+        echo "gemit version $VERSION"
+      else
+        echo "Version information not available"
+      fi
+      exit 0
+    ;;
     -h|--help)
       echo "Usage: $(basename "$0") [-a|--all] [-s|--submodule] [-r|--release] [-v|--verbose]"
       echo ""
@@ -44,6 +55,7 @@ while [[ "$#" -gt 0 ]]; do
       echo ""
       echo "Options:"
       echo "  -h, --help         Show this help message and exit."
+      echo "  --version          Show version information."
       echo "  -a, --all          Stage all tracked files before committing."
       echo "  -s, --submodule    If in a submodule, commit the submodule changes in the parent repository."
       echo "  -r, --release      Run 'npm run release' after committing."
@@ -117,14 +129,18 @@ then
   exit 1
 fi
 
+# Configuration for Gemini CLI
+GEMINI_MODEL="gemini-1.5-flash-8b"
+COMMIT_PROMPT="Generate a concise git commit message (max 72 chars) for this diff. If a TODO comment with issue number is removed, end with '(fixes #123)'. Return only the commit message."
+
 # Call the Gemini CLI with the staged diff and request a brief commit message.
 if [ "$VERBOSE" = true ]; then
   echo "Generating commit message with Gemini CLI..."
-  COMMIT_MESSAGE=$(git diff --staged | gemini -m gemini-2.5-flash-lite -p "Generate a concise, one-line GitHub commit message based on the following git diff. The message should be no more than 72 characters. If the diff shows the removal of a comment like '# TODO: #123 ...', the commit message should end with '(fixes #123)'. Only include the issue number if the TODO comment is being removed. You do not have to modify any files. Return only the commit message itself, without any extra text or explanations.")
+  COMMIT_MESSAGE=$(git diff --staged | gemini -m "$GEMINI_MODEL" -p "$COMMIT_PROMPT")
 else
   show_spinner "$ACTION_SUMMARY" &
   SPINNER_PID=$!
-  COMMIT_MESSAGE=$(git diff --staged | gemini -m gemini-2.5-flash-lite -p "Generate a concise, one-line GitHub commit message based on the following git diff. The message should be no more than 72 characters. If the diff shows the removal of a comment like '# TODO: #123 ...', the commit message should end with '(fixes #123)'. Only include the issue number if the TODO comment is being removed. You do not have to modify any files. Return only the commit message itself, without any extra text or explanations." 2>/dev/null)
+  COMMIT_MESSAGE=$(git diff --staged | gemini -m "$GEMINI_MODEL" -p "$COMMIT_PROMPT" 2>/dev/null)
   kill "$SPINNER_PID" &>/dev/null
   unset SPINNER_PID
   tput cnorm # Restore cursor
