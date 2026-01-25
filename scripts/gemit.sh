@@ -87,6 +87,12 @@ while [[ "$#" -gt 0 ]]; do
   esac
 done
 
+# Ensure we are inside a git repository before proceeding.
+if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  echo "Error: This script must be run inside a git repository."
+  exit 1
+fi
+
 ACTION_SUMMARY=""
 OPERATIONS=()
 

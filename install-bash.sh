@@ -15,6 +15,12 @@ if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
     exit 0
 fi
 
+# Check if gemini CLI is installed
+if ! command -v gemini &> /dev/null; then
+    echo "Error: gemini CLI is not installed. Please install it before running this installer."
+    exit 1
+fi
+
 # The directory where this script is located
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -30,8 +36,17 @@ if [[ "${1:-}" == "--uninstall" || "${1:-}" == "-u" ]]; then
     if [[ -f "$ALIAS_FILE" ]] && grep -q "$MARKER" "$ALIAS_FILE"; then
         echo "Uninstalling gemini-cli-helpers aliases..."
         sed -i "/$MARKER/d" "$ALIAS_FILE"
-        echo "Aliases removed from $ALIAS_FILE."
-        echo "Please run 'source $BASHRC_FILE' or restart your shell to apply the changes."
+        # Unalias currently-loaded aliases in this shell session
+        for script_path in "$SCRIPT_DIR"/scripts/*.sh; do
+            if [ -f "$script_path" ]; then
+                alias_name="$(basename "${script_path%.sh}")"
+                if alias "$alias_name" >/dev/null 2>&1; then
+                    unalias "$alias_name"
+                fi
+            fi
+        done
+        echo "Aliases removed from $ALIAS_FILE and cleared from the current shell (if loaded)."
+        echo "Restart your shell to ensure all sessions pick up the removal."
     else
         echo "No gemini-cli-helpers aliases found to uninstall."
     fi
@@ -44,12 +59,18 @@ echo "Installing scripts from $SCRIPT_DIR..."
 touch "$ALIAS_FILE"
 
 # Add sourcing of alias file to .bashrc if not already present
-if ! grep -q "source $ALIAS_FILE" "$BASHRC_FILE" && ! grep -q ". $ALIAS_FILE" "$BASHRC_FILE"; then
-    echo "Adding source for $ALIAS_FILE to $BASHRC_FILE..."
-    echo -e "\n# Source shell script aliases" >> "$BASHRC_FILE"
-    echo "if [ -f \"$ALIAS_FILE\" ]; then" >> "$BASHRC_FILE"
-    echo "    . \"$ALIAS_FILE\"" >> "$BASHRC_FILE"
-    echo "fi" >> "$BASHRC_FILE"
+BASHRC_MARKER="# Source shell script aliases (added by gemini-cli-helpers installer)"
+if ! grep -q "$BASHRC_MARKER" "$BASHRC_FILE"; then
+    if grep -Eq "\\.bash_aliases" "$BASHRC_FILE"; then
+        echo "Existing .bash_aliases sourcing found in $BASHRC_FILE; leaving as-is."
+    else
+        echo "Adding source for $ALIAS_FILE to $BASHRC_FILE..."
+        echo "" >> "$BASHRC_FILE"
+        echo "$BASHRC_MARKER" >> "$BASHRC_FILE"
+        echo "if [ -f \"$ALIAS_FILE\" ]; then" >> "$BASHRC_FILE"
+        echo "    . \"$ALIAS_FILE\"" >> "$BASHRC_FILE"
+        echo "fi" >> "$BASHRC_FILE"
+    fi
 fi
 
 # Remove old aliases managed by this script
@@ -62,10 +83,6 @@ fi
 for script_path in "$SCRIPT_DIR"/scripts/*.sh; do
     if [ -f "$script_path" ]; then
         script_name=$(basename "$script_path")
-        # Skip the installer script itself
-        if [ "$script_name" == "install.sh" ]; then
-            continue
-        fi
         alias_name="${script_name%.sh}"
         echo "Adding alias: $alias_name"
         # Make the script executable
