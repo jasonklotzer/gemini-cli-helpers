@@ -123,6 +123,15 @@ fi
 ACTION_SUMMARY=$(printf " » %s" "${OPERATIONS[@]}")
 ACTION_SUMMARY="exec${ACTION_SUMMARY}"
 
+# Check if there are any changes (staged or unstaged) to work with
+HAS_STAGED=$(! git diff --staged --quiet; echo $?)
+HAS_UNSTAGED=$(! git diff --quiet; echo $?)
+
+if [ "$HAS_STAGED" -ne 0 ] && [ "$HAS_UNSTAGED" -ne 0 ]; then
+  echo "No changes detected. Exiting."
+  exit 0
+fi
+
 # Configuration for Gemini CLI
 GEMINI_MODEL="gemini-2.5-flash-lite"
 COMMIT_PROMPT="Generate a concise git commit message (max 72 chars) for this diff. If a TODO comment with issue number is removed, end with '(fixes #123)'. Return only the commit message."
@@ -131,14 +140,14 @@ CHANGES_PREVIEW_PROMPT="Provide a brief, concise summary of the changes in this 
 # Display changes preview if requested
 if [ "$SHOW_PREVIEW" = true ]; then
   # Determine which diff to show (staged or unstaged)
-  if git diff --staged --quiet; then
-    # No staged changes, show unstaged
-    DIFF_SOURCE="unstaged"
-    DISPLAY_DIFF=$(git diff)
-  else
+  if [ "$HAS_STAGED" -eq 0 ]; then
     # Show staged changes
     DIFF_SOURCE="staged"
     DISPLAY_DIFF=$(git diff --staged)
+  else
+    # Show unstaged changes
+    DIFF_SOURCE="unstaged"
+    DISPLAY_DIFF=$(git diff)
   fi
   
   echo ""
@@ -182,7 +191,7 @@ if [ "$SHOW_PREVIEW" = true ]; then
 fi
 
 # Check if there are any staged changes to commit.
-if git diff --staged --quiet; then
+if [ "$HAS_STAGED" -ne 0 ]; then
   echo "No staged changes to commit. Exiting."
   exit 0
 fi
