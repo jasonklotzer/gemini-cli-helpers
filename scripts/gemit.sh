@@ -136,7 +136,7 @@ fi
 # Configuration for Gemini CLI
 GEMINI_MODEL="gemini-2.5-flash-lite"
 COMMIT_PROMPT="Generate a concise git commit message (max 72 chars) for this diff. If a TODO comment with issue number is removed, end with '(fixes #123)'. Return only the commit message."
-CHANGES_PREVIEW_PROMPT="Provide a brief, concise summary of the changes in this diff in 2-3 sentences maximum. Focus on what was changed and why. Keep it short and scannable. For new files, describe what they contain."
+CHANGES_PREVIEW_PROMPT="Provide a concise summary of the changes in this diff using a bulleted list. Focus on what was changed and why. Keep it short and scannable. For new files, describe what they contain."
 
 # Display changes preview if requested
 if [ "$SHOW_PREVIEW" = true ]; then
