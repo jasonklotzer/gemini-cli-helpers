@@ -34,6 +34,7 @@ SUBMODULE_COMMIT=false
 STAGE_ALL=false
 RUN_RELEASE=false
 VERBOSE=false
+SHOW_PREVIEW=false
 
 while [[ "$#" -gt 0 ]]; do
   case $1 in
@@ -49,7 +50,7 @@ while [[ "$#" -gt 0 ]]; do
       exit 0
     ;;
     -h|--help)
-      echo "Usage: $(basename "$0") [-a|--all] [-s|--submodule] [-r|--release] [-v|--verbose]"
+      echo "Usage: $(basename "$0") [-a|--all] [-s|--submodule] [-r|--release] [-v|--verbose] [-p|--preview]"
       echo ""
       echo "This script automates the process of generating a commit message using the Gemini CLI and then committing the changes."
       echo ""
@@ -60,6 +61,7 @@ while [[ "$#" -gt 0 ]]; do
       echo "  -s, --submodule    If in a submodule, commit the submodule changes in the parent repository."
       echo "  -r, --release      Run 'npm run release' after committing."
       echo "  -v, --verbose      Enable verbose mode to show all messages for debugging."
+      echo "  -p, --preview      Preview all changes before committing."
       echo ""
       echo "Before running, ensure that you have staged the changes you want to commit, or use the -a/--all flag."
       exit 0
@@ -78,6 +80,10 @@ while [[ "$#" -gt 0 ]]; do
     ;;
     -v|--verbose)
       VERBOSE=true
+      shift
+    ;;
+    -p|--preview)
+      SHOW_PREVIEW=true
       shift
     ;;
     *)
@@ -117,6 +123,63 @@ fi
 ACTION_SUMMARY=$(printf " » %s" "${OPERATIONS[@]}")
 ACTION_SUMMARY="exec${ACTION_SUMMARY}"
 
+# Configuration for Gemini CLI
+GEMINI_MODEL="gemini-2.5-flash-lite"
+COMMIT_PROMPT="Generate a concise git commit message (max 72 chars) for this diff. If a TODO comment with issue number is removed, end with '(fixes #123)'. Return only the commit message."
+CHANGES_PREVIEW_PROMPT="Provide a brief, concise summary of the changes in this diff in 2-3 sentences maximum. Focus on what was changed and why. Keep it short and scannable."
+
+# Display changes preview if requested
+if [ "$SHOW_PREVIEW" = true ]; then
+  # Determine which diff to show (staged or unstaged)
+  if git diff --staged --quiet; then
+    # No staged changes, show unstaged
+    DIFF_SOURCE="unstaged"
+    DISPLAY_DIFF=$(git diff)
+  else
+    # Show staged changes
+    DIFF_SOURCE="staged"
+    DISPLAY_DIFF=$(git diff --staged)
+  fi
+  
+  echo ""
+  echo "╔════════════════════════════════════════════════════════════╗"
+  printf "║ %-58s ║\n" "CHANGES PREVIEW ($DIFF_SOURCE changes)"
+  echo "╚════════════════════════════════════════════════════════════╝"
+  echo ""
+  
+  # Show changed files and statistics
+  echo "Files Changed:"
+  echo "--------------"
+  if [ "$DIFF_SOURCE" = "staged" ]; then
+    git diff --staged --stat
+  else
+    git diff --stat
+  fi
+  echo ""
+  
+  # Check if the Gemini CLI is available for summary generation
+  if command -v gemini &> /dev/null; then
+    if [ "$VERBOSE" = true ]; then
+      echo "Generating comprehensive changes summary with Gemini CLI..."
+    fi
+    show_spinner "Analyzing changes" &
+    SPINNER_PID=$!
+    CHANGES_SUMMARY=$(echo "$DISPLAY_DIFF" | gemini -m "$GEMINI_MODEL" -p "$CHANGES_PREVIEW_PROMPT" 2>/dev/null)
+    kill "$SPINNER_PID" &>/dev/null
+    unset SPINNER_PID
+    tput cnorm # Restore cursor
+    printf "\n"
+    
+    if [[ -n "${CHANGES_SUMMARY}" ]]; then
+      echo "Summary:"
+      echo "--------"
+      echo "$CHANGES_SUMMARY"
+      echo ""
+    fi
+  fi
+  
+  exit 0
+fi
 
 # Check if there are any staged changes to commit.
 if git diff --staged --quiet; then
@@ -134,10 +197,6 @@ then
   echo "Gemini CLI not found. Please install it to use this script."
   exit 1
 fi
-
-# Configuration for Gemini CLI
-GEMINI_MODEL="gemini-2.5-flash-lite"
-COMMIT_PROMPT="Generate a concise git commit message (max 72 chars) for this diff. If a TODO comment with issue number is removed, end with '(fixes #123)'. Return only the commit message."
 
 # Call the Gemini CLI with the staged diff and request a brief commit message.
 if [ "$VERBOSE" = true ]; then
