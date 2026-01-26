@@ -123,11 +123,12 @@ fi
 ACTION_SUMMARY=$(printf " » %s" "${OPERATIONS[@]}")
 ACTION_SUMMARY="exec${ACTION_SUMMARY}"
 
-# Check if there are any changes (staged or unstaged) to work with
+# Check if there are any changes (staged, unstaged, or new files) to work with
 HAS_STAGED=$(! git diff --staged --quiet; echo $?)
 HAS_UNSTAGED=$(! git diff --quiet; echo $?)
+HAS_UNTRACKED=$(git ls-files --others --exclude-standard | wc -l)
 
-if [ "$HAS_STAGED" -ne 0 ] && [ "$HAS_UNSTAGED" -ne 0 ]; then
+if [ "$HAS_STAGED" -ne 0 ] && [ "$HAS_UNSTAGED" -ne 0 ] && [ "$HAS_UNTRACKED" -eq 0 ]; then
   echo "No changes detected. Exiting."
   exit 0
 fi
@@ -135,7 +136,7 @@ fi
 # Configuration for Gemini CLI
 GEMINI_MODEL="gemini-2.5-flash-lite"
 COMMIT_PROMPT="Generate a concise git commit message (max 72 chars) for this diff. If a TODO comment with issue number is removed, end with '(fixes #123)'. Return only the commit message."
-CHANGES_PREVIEW_PROMPT="Provide a brief, concise summary of the changes in this diff in 2-3 sentences maximum. Focus on what was changed and why. Keep it short and scannable."
+CHANGES_PREVIEW_PROMPT="Provide a brief, concise summary of the changes in this diff in 2-3 sentences maximum. Focus on what was changed and why. Keep it short and scannable. For new files, describe what they contain."
 
 # Display changes preview if requested
 if [ "$SHOW_PREVIEW" = true ]; then
@@ -148,6 +149,23 @@ if [ "$SHOW_PREVIEW" = true ]; then
     # Show unstaged changes
     DIFF_SOURCE="unstaged"
     DISPLAY_DIFF=$(git diff)
+  fi
+  
+  # Include untracked files info for Gemini analysis
+  if [ "$HAS_UNTRACKED" -gt 0 ]; then
+    # Add file contents for small untracked files (up to 100 lines each)
+    while IFS= read -r file; do
+      if [ -f "$file" ]; then
+        LINE_COUNT=$(wc -l < "$file" 2>/dev/null || echo 0)
+        if [ "$LINE_COUNT" -le 100 ]; then
+          DISPLAY_DIFF+=$'\n\n'"--- New file: $file ---"$'\n'
+          DISPLAY_DIFF+=$(cat "$file" 2>/dev/null)
+          DISPLAY_DIFF+=$'\n'
+        else
+          DISPLAY_DIFF+=$'\n\n'"--- New file: $file (large file, $LINE_COUNT lines) ---"
+        fi
+      fi
+    done < <(git ls-files --others --exclude-standard)
   fi
   
   echo ""
@@ -164,26 +182,36 @@ if [ "$SHOW_PREVIEW" = true ]; then
   else
     git diff --stat
   fi
+  
+  # Show untracked files if any exist
+  if [ "$HAS_UNTRACKED" -gt 0 ]; then
+    echo ""
+    echo "Untracked files (not staged):"
+    git ls-files --others --exclude-standard | sed 's/^/  /'
+  fi
   echo ""
   
   # Check if the Gemini CLI is available for summary generation
   if command -v gemini &> /dev/null; then
-    if [ "$VERBOSE" = true ]; then
-      echo "Generating comprehensive changes summary with Gemini CLI..."
-    fi
-    show_spinner "Analyzing changes" &
-    SPINNER_PID=$!
-    CHANGES_SUMMARY=$(echo "$DISPLAY_DIFF" | gemini -m "$GEMINI_MODEL" -p "$CHANGES_PREVIEW_PROMPT" 2>/dev/null)
-    kill "$SPINNER_PID" &>/dev/null
-    unset SPINNER_PID
-    tput cnorm # Restore cursor
-    printf "\n"
-    
-    if [[ -n "${CHANGES_SUMMARY}" ]]; then
-      echo "Summary:"
-      echo "--------"
-      echo "$CHANGES_SUMMARY"
-      echo ""
+    # Check if there's any content to analyze
+    if [ -n "$DISPLAY_DIFF" ] && [ "$DISPLAY_DIFF" != "" ]; then
+      if [ "$VERBOSE" = true ]; then
+        echo "Generating comprehensive changes summary with Gemini CLI..."
+      fi
+      show_spinner "Analyzing changes" &
+      SPINNER_PID=$!
+      CHANGES_SUMMARY=$(echo "$DISPLAY_DIFF" | gemini -m "$GEMINI_MODEL" -p "$CHANGES_PREVIEW_PROMPT" 2>/dev/null)
+      kill "$SPINNER_PID" &>/dev/null
+      unset SPINNER_PID
+      tput cnorm # Restore cursor
+      printf "\n"
+      
+      if [[ -n "${CHANGES_SUMMARY}" ]]; then
+        echo "Summary:"
+        echo "--------"
+        echo "$CHANGES_SUMMARY"
+        echo ""
+      fi
     fi
   fi
   
