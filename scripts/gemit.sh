@@ -135,6 +135,9 @@ fi
 
 # Configuration for Gemini CLI
 GEMINI_MODEL="gemini-2.5-flash-lite"
+# Default to trusted-workspace mode for headless/automated runs.
+# Users can still override by explicitly setting GEMINI_CLI_TRUST_WORKSPACE.
+GEMINI_CLI_TRUST_WORKSPACE="${GEMINI_CLI_TRUST_WORKSPACE:-true}"
 COMMIT_PROMPT="Generate a concise git commit message (max 72 chars) for this diff. If a TODO comment with issue number is removed, end with '(fixes #123)'. Return only the commit message."
 CHANGES_PREVIEW_PROMPT="Provide a concise summary of the changes in this diff using a bulleted list. Focus on what was changed and why. Keep it short and scannable. For new files, describe what they contain."
 
@@ -200,7 +203,7 @@ if [ "$SHOW_PREVIEW" = true ]; then
       fi
       show_spinner "Analyzing changes" &
       SPINNER_PID=$!
-      CHANGES_SUMMARY=$(echo "$DISPLAY_DIFF" | gemini -m "$GEMINI_MODEL" -p "$CHANGES_PREVIEW_PROMPT" 2>/dev/null)
+      CHANGES_SUMMARY=$(echo "$DISPLAY_DIFF" | GEMINI_CLI_TRUST_WORKSPACE="$GEMINI_CLI_TRUST_WORKSPACE" gemini -m "$GEMINI_MODEL" -p "$CHANGES_PREVIEW_PROMPT" 2>/dev/null)
       kill "$SPINNER_PID" &>/dev/null
       unset SPINNER_PID
       tput cnorm # Restore cursor
@@ -238,11 +241,11 @@ fi
 # Call the Gemini CLI with the staged diff and request a brief commit message.
 if [ "$VERBOSE" = true ]; then
   echo "Generating commit message with Gemini CLI..."
-  COMMIT_MESSAGE=$(git diff --staged | gemini -m "$GEMINI_MODEL" -p "$COMMIT_PROMPT")
+  COMMIT_MESSAGE=$(git diff --staged | GEMINI_CLI_TRUST_WORKSPACE="$GEMINI_CLI_TRUST_WORKSPACE" gemini -m "$GEMINI_MODEL" -p "$COMMIT_PROMPT")
 else
   show_spinner "$ACTION_SUMMARY" &
   SPINNER_PID=$!
-  COMMIT_MESSAGE=$(git diff --staged | gemini -m "$GEMINI_MODEL" -p "$COMMIT_PROMPT" 2>/dev/null)
+  COMMIT_MESSAGE=$(git diff --staged | GEMINI_CLI_TRUST_WORKSPACE="$GEMINI_CLI_TRUST_WORKSPACE" gemini -m "$GEMINI_MODEL" -p "$COMMIT_PROMPT" 2>/dev/null)
   kill "$SPINNER_PID" &>/dev/null
   unset SPINNER_PID
   tput cnorm # Restore cursor
