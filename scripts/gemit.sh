@@ -135,6 +135,9 @@ fi
 
 # Configuration for Gemini CLI
 GEMINI_MODEL="gemini-2.5-flash-lite"
+# Default to trusted-workspace mode for headless/automated runs.
+# Users can still override by explicitly setting GEMINI_CLI_TRUST_WORKSPACE.
+GEMINI_CLI_TRUST_WORKSPACE="${GEMINI_CLI_TRUST_WORKSPACE:-true}"
 
 # Cap on the diff text piped to the Gemini CLI. A huge diff (lockfiles, vendored code) wastes
 # tokens and makes a degenerate, prompt-ignoring response more likely - and the gemini CLI
@@ -142,12 +145,20 @@ GEMINI_MODEL="gemini-2.5-flash-lite"
 # lead with the --stat so the model still sees every file.
 MAX_DIFF_CHARS=30000
 
-# cap_diff <diff text> <stat text>
+# Cap on how many untracked files the preview lists and inspects.
+MAX_UNTRACKED_FILES=50
+
+# <command> | cap_diff <stat text>
+# Reads the diff from stdin but never holds more than MAX_DIFF_CHARS+1 bytes of it: a
+# multi-hundred-MB diff captured whole with $(...) costs bash several times its size in RAM,
+# enough to get the editor/terminal hosting this script OOM-killed. The rest of stdin is
+# drained (streamed, not stored) so the writer exits cleanly instead of on SIGPIPE.
 cap_diff() {
-  local diff="$1" stat="$2"
+  local LC_ALL=C stat="$1" diff
+  diff=$(head -c "$((MAX_DIFF_CHARS + 1))"; cat >/dev/null)
   if [ "${#diff}" -gt "$MAX_DIFF_CHARS" ]; then
-    printf '%s\n\n[patch truncated to first %s of %s characters]\n\n%s' \
-      "$stat" "$MAX_DIFF_CHARS" "${#diff}" "${diff:0:MAX_DIFF_CHARS}"
+    printf '%s\n\n[patch truncated to first %s characters]\n\n%s' \
+      "$stat" "$MAX_DIFF_CHARS" "${diff:0:MAX_DIFF_CHARS}"
   else
     printf '%s' "$diff"
   fi
@@ -159,39 +170,39 @@ CHANGES_PREVIEW_PROMPT="Provide a concise summary of the changes in this diff us
 if [ "$SHOW_PREVIEW" = true ]; then
   # Determine which diff to show (staged or unstaged)
   if [ "$HAS_STAGED" -eq 0 ]; then
-    # Show staged changes
     DIFF_SOURCE="staged"
-    DISPLAY_DIFF=$(git diff --staged)
-    DISPLAY_STAT=$(git diff --staged --stat)
+    DIFF_ARGS=(--staged)
   else
-    # Show unstaged changes
     DIFF_SOURCE="unstaged"
-    DISPLAY_DIFF=$(git diff)
-    DISPLAY_STAT=$(git diff --stat)
+    DIFF_ARGS=()
   fi
-  
+  DISPLAY_STAT=$(git diff "${DIFF_ARGS[@]}" --stat)
+  DISPLAY_DIFF=$(git diff "${DIFF_ARGS[@]}" | cap_diff "$DISPLAY_STAT")
+
   # Include untracked files info for Gemini analysis
   if [ "$HAS_UNTRACKED" -gt 0 ]; then
-    # Add file contents for small untracked files (up to 100 lines each)
+    # Add file contents for small untracked files (up to 100 lines each), but only while
+    # there is room left under MAX_DIFF_CHARS, and read at most that much of each file.
     while IFS= read -r file; do
+      BUDGET=$((MAX_DIFF_CHARS - ${#DISPLAY_DIFF}))
       if [ -f "$file" ] && ! grep -Iq . "$file" 2>/dev/null; then
         # Binary (or empty) file: name it, never inline its bytes.
         DISPLAY_DIFF+=$'\n\n'"--- New file: $file (binary) ---"
-        DISPLAY_STAT+=$'\n'" $file (new, binary)"
       elif [ -f "$file" ]; then
-        DISPLAY_STAT+=$'\n'" $file (new)"
         LINE_COUNT=$(wc -l < "$file" 2>/dev/null || echo 0)
-        if [ "$LINE_COUNT" -le 100 ]; then
+        if [ "$LINE_COUNT" -le 100 ] && [ "$BUDGET" -gt 0 ]; then
           DISPLAY_DIFF+=$'\n\n'"--- New file: $file ---"$'\n'
-          DISPLAY_DIFF+=$(cat "$file" 2>/dev/null)
+          DISPLAY_DIFF+=$(head -c "$BUDGET" "$file" 2>/dev/null)
           DISPLAY_DIFF+=$'\n'
         else
-          DISPLAY_DIFF+=$'\n\n'"--- New file: $file (large file, $LINE_COUNT lines) ---"
+          DISPLAY_DIFF+=$'\n\n'"--- New file: $file ($LINE_COUNT lines, not inlined) ---"
         fi
       fi
-    done < <(git ls-files --others --exclude-standard)
+    done < <(git ls-files --others --exclude-standard | sed -n "1,${MAX_UNTRACKED_FILES}p")
+    if [ "$HAS_UNTRACKED" -gt "$MAX_UNTRACKED_FILES" ]; then
+      DISPLAY_DIFF+=$'\n\n'"--- ...and $((HAS_UNTRACKED - MAX_UNTRACKED_FILES)) more new files ---"
+    fi
   fi
-  DISPLAY_DIFF=$(cap_diff "$DISPLAY_DIFF" "$DISPLAY_STAT")
   
   echo ""
   echo "╔════════════════════════════════════════════════════════════╗"
@@ -212,7 +223,10 @@ if [ "$SHOW_PREVIEW" = true ]; then
   if [ "$HAS_UNTRACKED" -gt 0 ]; then
     echo ""
     echo "Untracked files (not staged):"
-    git ls-files --others --exclude-standard | sed 's/^/  /'
+    git ls-files --others --exclude-standard | sed -n "1,${MAX_UNTRACKED_FILES}s/^/  /p"
+    if [ "$HAS_UNTRACKED" -gt "$MAX_UNTRACKED_FILES" ]; then
+      echo "  ...and $((HAS_UNTRACKED - MAX_UNTRACKED_FILES)) more"
+    fi
   fi
   echo ""
   
@@ -225,7 +239,7 @@ if [ "$SHOW_PREVIEW" = true ]; then
       fi
       show_spinner "Analyzing changes" &
       SPINNER_PID=$!
-      CHANGES_SUMMARY=$(echo "$DISPLAY_DIFF" | gemini -m "$GEMINI_MODEL" -p "$CHANGES_PREVIEW_PROMPT" 2>/dev/null)
+      CHANGES_SUMMARY=$(printf '%s\n' "$DISPLAY_DIFF" | GEMINI_CLI_TRUST_WORKSPACE="$GEMINI_CLI_TRUST_WORKSPACE" gemini -m "$GEMINI_MODEL" -p "$CHANGES_PREVIEW_PROMPT" 2>/dev/null)
       kill "$SPINNER_PID" &>/dev/null
       unset SPINNER_PID
       tput cnorm # Restore cursor
@@ -262,15 +276,15 @@ fi
 
 # Call the Gemini CLI with the staged diff (capped, see MAX_DIFF_CHARS) and request a brief
 # commit message.
-STAGED_DIFF=$(cap_diff "$(git diff --staged)" "$(git diff --staged --stat)")
+STAGED_DIFF=$(git diff --staged | cap_diff "$(git diff --staged --stat)")
 
 if [ "$VERBOSE" = true ]; then
   echo "Generating commit message with Gemini CLI..."
-  COMMIT_MESSAGE=$(printf '%s\n' "$STAGED_DIFF" | gemini -m "$GEMINI_MODEL" -p "$COMMIT_PROMPT")
+  COMMIT_MESSAGE=$(printf '%s\n' "$STAGED_DIFF" | GEMINI_CLI_TRUST_WORKSPACE="$GEMINI_CLI_TRUST_WORKSPACE" gemini -m "$GEMINI_MODEL" -p "$COMMIT_PROMPT")
 else
   show_spinner "$ACTION_SUMMARY" &
   SPINNER_PID=$!
-  COMMIT_MESSAGE=$(printf '%s\n' "$STAGED_DIFF" | gemini -m "$GEMINI_MODEL" -p "$COMMIT_PROMPT" 2>/dev/null)
+  COMMIT_MESSAGE=$(printf '%s\n' "$STAGED_DIFF" | GEMINI_CLI_TRUST_WORKSPACE="$GEMINI_CLI_TRUST_WORKSPACE" gemini -m "$GEMINI_MODEL" -p "$COMMIT_PROMPT" 2>/dev/null)
   kill "$SPINNER_PID" &>/dev/null
   unset SPINNER_PID
   tput cnorm # Restore cursor
