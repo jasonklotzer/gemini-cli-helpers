@@ -135,6 +135,23 @@ fi
 
 # Configuration for Gemini CLI
 GEMINI_MODEL="gemini-2.5-flash-lite"
+
+# Cap on the diff text piped to the Gemini CLI. A huge diff (lockfiles, vendored code) wastes
+# tokens and makes a degenerate, prompt-ignoring response more likely - and the gemini CLI
+# (0.52) itself runs out of heap and dies on ~100K characters of stdin (40K works). When capped,
+# lead with the --stat so the model still sees every file.
+MAX_DIFF_CHARS=30000
+
+# cap_diff <diff text> <stat text>
+cap_diff() {
+  local diff="$1" stat="$2"
+  if [ "${#diff}" -gt "$MAX_DIFF_CHARS" ]; then
+    printf '%s\n\n[patch truncated to first %s of %s characters]\n\n%s' \
+      "$stat" "$MAX_DIFF_CHARS" "${#diff}" "${diff:0:MAX_DIFF_CHARS}"
+  else
+    printf '%s' "$diff"
+  fi
+}
 COMMIT_PROMPT="Generate a concise git commit message (max 72 chars) for this diff. If a TODO comment with issue number is removed, end with '(fixes #123)'. Return only the commit message."
 CHANGES_PREVIEW_PROMPT="Provide a concise summary of the changes in this diff using a bulleted list. Focus on what was changed and why. Keep it short and scannable. For new files, describe what they contain."
 
@@ -145,17 +162,24 @@ if [ "$SHOW_PREVIEW" = true ]; then
     # Show staged changes
     DIFF_SOURCE="staged"
     DISPLAY_DIFF=$(git diff --staged)
+    DISPLAY_STAT=$(git diff --staged --stat)
   else
     # Show unstaged changes
     DIFF_SOURCE="unstaged"
     DISPLAY_DIFF=$(git diff)
+    DISPLAY_STAT=$(git diff --stat)
   fi
   
   # Include untracked files info for Gemini analysis
   if [ "$HAS_UNTRACKED" -gt 0 ]; then
     # Add file contents for small untracked files (up to 100 lines each)
     while IFS= read -r file; do
-      if [ -f "$file" ]; then
+      if [ -f "$file" ] && ! grep -Iq . "$file" 2>/dev/null; then
+        # Binary (or empty) file: name it, never inline its bytes.
+        DISPLAY_DIFF+=$'\n\n'"--- New file: $file (binary) ---"
+        DISPLAY_STAT+=$'\n'" $file (new, binary)"
+      elif [ -f "$file" ]; then
+        DISPLAY_STAT+=$'\n'" $file (new)"
         LINE_COUNT=$(wc -l < "$file" 2>/dev/null || echo 0)
         if [ "$LINE_COUNT" -le 100 ]; then
           DISPLAY_DIFF+=$'\n\n'"--- New file: $file ---"$'\n'
@@ -167,6 +191,7 @@ if [ "$SHOW_PREVIEW" = true ]; then
       fi
     done < <(git ls-files --others --exclude-standard)
   fi
+  DISPLAY_DIFF=$(cap_diff "$DISPLAY_DIFF" "$DISPLAY_STAT")
   
   echo ""
   echo "╔════════════════════════════════════════════════════════════╗"
@@ -235,19 +260,32 @@ then
   exit 1
 fi
 
-# Call the Gemini CLI with the staged diff and request a brief commit message.
+# Call the Gemini CLI with the staged diff (capped, see MAX_DIFF_CHARS) and request a brief
+# commit message.
+STAGED_DIFF=$(cap_diff "$(git diff --staged)" "$(git diff --staged --stat)")
+
 if [ "$VERBOSE" = true ]; then
   echo "Generating commit message with Gemini CLI..."
-  COMMIT_MESSAGE=$(git diff --staged | gemini -m "$GEMINI_MODEL" -p "$COMMIT_PROMPT")
+  COMMIT_MESSAGE=$(printf '%s\n' "$STAGED_DIFF" | gemini -m "$GEMINI_MODEL" -p "$COMMIT_PROMPT")
 else
   show_spinner "$ACTION_SUMMARY" &
   SPINNER_PID=$!
-  COMMIT_MESSAGE=$(git diff --staged | gemini -m "$GEMINI_MODEL" -p "$COMMIT_PROMPT" 2>/dev/null)
+  COMMIT_MESSAGE=$(printf '%s\n' "$STAGED_DIFF" | gemini -m "$GEMINI_MODEL" -p "$COMMIT_PROMPT" 2>/dev/null)
   kill "$SPINNER_PID" &>/dev/null
   unset SPINNER_PID
   tput cnorm # Restore cursor
   printf "\r%s\n"
 fi
+
+# The model is asked for a single short line, but can misbehave and return a
+# multi-line blob (markdown fences, explanations, or a dump of the diff).
+# Reduce it to the first real line and cap the length - an oversized message
+# blows past the kernel's per-argument exec limit at 'git commit -m'
+# ("Argument list too long").
+COMMIT_MESSAGE=$(printf '%s\n' "$COMMIT_MESSAGE" \
+  | grep -v -e '^[[:space:]]*$' -e '^[[:space:]]*```' \
+  | head -n 1) || true
+COMMIT_MESSAGE=${COMMIT_MESSAGE:0:200}
 
 # Check if a message was successfully generated
 if [[ -z "${COMMIT_MESSAGE}" ]]; then
